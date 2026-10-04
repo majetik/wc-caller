@@ -9,10 +9,10 @@ const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 const MAX_IMAGE_SIDE = 1600;
 const APP_URL = location.origin + location.pathname;
 const POST_FIELDS = `id, body, media_path, media_type, meetup_start, meetup_minutes, created_at, author_id,
-  author:profiles(display_name, avatar_url),
+  author:profiles!posts_author_id_fkey(display_name, avatar_url),
   likes(count), comments(count),
   rsvps(user_id, status, profile:profiles(display_name))`;
-const COMMENT_FIELDS = 'id, post_id, body, created_at, author_id, author:profiles(display_name, avatar_url)';
+const COMMENT_FIELDS = 'id, post_id, body, created_at, author_id, author:profiles!comments_author_id_fkey(display_name, avatar_url)';
 
 const state = {
   user: null,
