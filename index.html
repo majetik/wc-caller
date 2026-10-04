@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>WC Caller</title>
+  <meta name="description" content="A simple feed for posts, photos, videos and meetups.">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0b0e11" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="WC Caller">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <button id="brand" class="brand" type="button" aria-label="WC Caller, refresh feed">WC Caller</button>
+    <div id="account" class="account"></div>
+  </header>
+
+  <button id="new-posts" class="pill" type="button" hidden></button>
+
+  <main id="feed" class="feed" aria-live="polite"></main>
+  <p id="feed-status" class="status"></p>
+  <div id="sentinel" aria-hidden="true"></div>
+
+  <button id="fab" class="fab" type="button" aria-label="New post" data-icon="plus" hidden></button>
+
+  <!-- New post -->
+  <dialog id="composer" class="sheet">
+    <form id="composer-form" class="sheet-inner" novalidate>
+      <div class="sheet-head">
+        <button type="button" class="text-btn" data-close>Cancel</button>
+        <span class="sheet-title">New post</span>
+        <button type="submit" id="post-btn" class="primary-btn" disabled>Post</button>
+      </div>
+      <div class="sheet-body">
+        <textarea id="post-text" rows="5" placeholder="What's happening?" aria-label="Post text"></textarea>
+        <div id="media-preview" class="media-preview" hidden></div>
+        <fieldset id="meetup-fields" class="meetup-fields" hidden>
+          <legend>Meetup invite</legend>
+          <div class="meetup-grid">
+            <label>Day<input type="date" id="meetup-date"></label>
+            <label>Time<input type="time" id="meetup-time" step="300"></label>
+            <label>Duration
+              <select id="meetup-duration">
+                <option value="30">30 min</option>
+                <option value="60" selected>1 hour</option>
+                <option value="90">1.5 hours</option>
+                <option value="120">2 hours</option>
+                <option value="180">3 hours</option>
+                <option value="240">4 hours</option>
+                <option value="360">6 hours</option>
+                <option value="480">8 hours</option>
+              </select>
+            </label>
+          </div>
+          <p id="meetup-error" class="field-error" hidden>Pick a time in the future.</p>
+        </fieldset>
+      </div>
+      <div class="sheet-foot">
+        <button type="button" id="attach-btn" class="icon-btn" aria-label="Add photo or video" data-icon="image"></button>
+        <input type="file" id="file-input" accept="image/*,video/*" hidden>
+        <button type="button" id="meetup-btn" class="icon-btn" aria-label="Add meetup invite" aria-pressed="false" data-icon="calendar"></button>
+        <span id="char-count" class="char-count" aria-live="polite">299</span>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Comment thread -->
+  <dialog id="thread" class="sheet">
+    <div class="sheet-inner">
+      <div class="sheet-head">
+        <button type="button" class="text-btn" data-close>Close</button>
+        <span class="sheet-title">Thread</span>
+        <span class="head-spacer"></span>
+      </div>
+      <div class="sheet-body">
+        <div id="thread-post"></div>
+        <div id="thread-comments" class="comments"></div>
+      </div>
+      <div id="thread-foot" class="sheet-foot"></div>
+    </div>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+</body>
+</html>
