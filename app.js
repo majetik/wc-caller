@@ -1,5 +1,6 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
-import { SUPABASE_URL, SUPABASE_KEY, VAPID_PUBLIC_KEY } from './config.js';
+// Bump ?v= here and in index.html on each release so browsers don't mix cached old files with new ones.
+import { SUPABASE_URL, SUPABASE_KEY, VAPID_PUBLIC_KEY } from './config.js?v=2';
 
 const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
 
