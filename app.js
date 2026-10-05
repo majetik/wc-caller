@@ -1,5 +1,5 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
-import { SUPABASE_URL, SUPABASE_KEY } from './config.js';
+import { SUPABASE_URL, SUPABASE_KEY, VAPID_PUBLIC_KEY } from './config.js';
 
 const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
 
@@ -13,6 +13,10 @@ const POST_FIELDS = `id, body, media_path, media_type, meetup_start, meetup_minu
   likes(count), comments(count),
   rsvps(user_id, status, profile:profiles(display_name))`;
 const COMMENT_FIELDS = 'id, post_id, body, created_at, author_id, author:profiles!comments_author_id_fkey(display_name, avatar_url)';
+const NOTIFICATION_FIELDS = `id, kind, created_at, read_at, post_id,
+  actor:profiles!notifications_actor_id_fkey(display_name, avatar_url),
+  post:posts(body, meetup_start, meetup_minutes)`;
+const BANNER_DISMISSED_KEY = 'wc-push-banner-dismissed';
 
 const state = {
   user: null,
@@ -26,6 +30,8 @@ const state = {
   newCount: 0,
   threadPostId: null,
   threadComments: [],
+  unread: 0,
+  notificationsChannel: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -42,6 +48,12 @@ const els = {
   threadPost: $('thread-post'),
   threadComments: $('thread-comments'),
   threadFoot: $('thread-foot'),
+  bell: $('bell'),
+  bellCount: $('bell-count'),
+  pushBanner: $('push-banner'),
+  inbox: $('inbox'),
+  inboxList: $('inbox-list'),
+  pushSettings: $('push-settings'),
 };
 
 // ─── Small helpers ───────────────────────────────────────────────────────
@@ -53,6 +65,7 @@ const ICONS = {
   image: '<svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.8"/><path d="m20.5 15.5-4.8-4.8L7 19.5"/></svg>',
   trash: '<svg viewBox="0 0 24 24"><path d="M4.5 7h15M10 4h4M6.5 7l.9 12.1a1.5 1.5 0 0 0 1.5 1.4h6.2a1.5 1.5 0 0 0 1.5-1.4L17.5 7"/></svg>',
   plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
+  bell: '<svg viewBox="0 0 24 24"><path d="M6 16.5V11a6 6 0 1 1 12 0v5.5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg>',
 };
 
 function icon(name) {
@@ -633,6 +646,232 @@ form.fileInput.addEventListener('change', () => {
   setMedia(file);
 });
 
+// ─── Phone push notifications ────────────────────────────────────────────
+
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isStandalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const pushSupported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+
+function base64UrlToBytes(value) {
+  const base64 = (value + '='.repeat((4 - (value.length % 4)) % 4)).replace(/-/g, '+').replace(/_/g, '/');
+  return Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+}
+
+async function currentSubscription() {
+  if (!pushSupported) return null;
+  const registration = await navigator.serviceWorker.getRegistration();
+  return registration ? registration.pushManager.getSubscription() : null;
+}
+
+// 'on' | 'off' | 'blocked' | 'ios-install' | 'unsupported'
+async function pushStatus() {
+  if (!pushSupported) return isIOS && !isStandalone ? 'ios-install' : 'unsupported';
+  if (Notification.permission === 'denied') return 'blocked';
+  if (Notification.permission === 'granted' && await currentSubscription()) return 'on';
+  return 'off';
+}
+
+async function saveSubscription(subscription) {
+  const { endpoint, keys } = subscription.toJSON();
+  const { error } = await sb.from('push_subscriptions').upsert({
+    endpoint,
+    user_id: state.user.id,
+    p256dh: keys.p256dh,
+    auth: keys.auth,
+    time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    locale: navigator.language,
+  });
+  if (error) throw error;
+}
+
+async function enablePush() {
+  if (!state.user) return signIn();
+  try {
+    // Must be the first await: iPhones only show the prompt directly after a tap.
+    const permission = await Notification.requestPermission();
+    if (permission === 'granted') {
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = (await registration.pushManager.getSubscription())
+        ?? await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64UrlToBytes(VAPID_PUBLIC_KEY) });
+      await saveSubscription(subscription);
+      toast("Notifications are on. You'll hear about new meetups.");
+    }
+  } catch (err) {
+    console.error(err);
+    toast("Couldn't turn on notifications. Try again.");
+  }
+  await renderPushUi();
+}
+
+async function disablePush() {
+  const subscription = await currentSubscription();
+  if (subscription) {
+    await sb.from('push_subscriptions').delete().eq('endpoint', subscription.endpoint);
+    await subscription.unsubscribe();
+  }
+  await renderPushUi();
+}
+
+// Re-save on each visit in case the browser rotated the subscription.
+async function syncPushSubscription() {
+  if (!state.user || !pushSupported || Notification.permission !== 'granted') return;
+  const subscription = await currentSubscription();
+  if (subscription) saveSubscription(subscription).catch(console.error);
+}
+
+function bannerDismissed() {
+  try { return localStorage.getItem(BANNER_DISMISSED_KEY) === '1'; } catch { return false; }
+}
+
+function dismissBanner() {
+  try { localStorage.setItem(BANNER_DISMISSED_KEY, '1'); } catch { /* private mode */ }
+  els.pushBanner.hidden = true;
+}
+
+function pushCard(status, inBanner) {
+  const notNow = inBanner && h('button', { type: 'button', class: 'text-btn', onclick: dismissBanner }, 'Not now');
+  switch (status) {
+    case 'on':
+      return [
+        h('div', { class: 'banner-title' }, 'Notifications are on'),
+        h('p', { class: 'muted' }, 'This device gets a notification when someone posts a meetup.'),
+        h('button', { type: 'button', class: 'text-btn', onclick: disablePush }, 'Turn off on this device'),
+      ];
+    case 'off':
+      return [
+        h('div', { class: 'banner-title' }, 'Get notified about meetups'),
+        h('p', { class: 'muted' }, 'Get a notification on this device when someone posts a meetup invite.'),
+        h('div', { class: 'banner-actions' },
+          h('button', { type: 'button', class: 'primary-btn', onclick: enablePush }, 'Turn on notifications'),
+          notNow),
+      ];
+    case 'ios-install':
+      return [
+        h('div', { class: 'banner-title' }, 'Get meetup notifications on iPhone'),
+        h('p', { class: 'muted' }, 'iPhones only allow notifications from apps on your Home Screen:'),
+        h('ol', {},
+          h('li', {}, 'Tap the Share button (the square with an arrow).'),
+          h('li', {}, 'Choose “Add to Home Screen”.'),
+          h('li', {}, 'Open WC Caller from the new icon and turn on notifications.')),
+        notNow && h('div', { class: 'banner-actions' }, notNow),
+      ];
+    case 'blocked':
+      return [
+        h('div', { class: 'banner-title' }, 'Notifications are blocked'),
+        h('p', { class: 'muted' }, 'Allow notifications for WC Caller in your browser or phone settings, then come back here.'),
+      ];
+    case 'unsupported':
+      return [
+        h('div', { class: 'banner-title' }, 'Notifications unavailable'),
+        h('p', { class: 'muted' }, "This browser can't show notifications. Try Chrome on Android, or add WC Caller to your iPhone Home Screen."),
+      ];
+    default:
+      return [];
+  }
+}
+
+async function renderPushUi() {
+  const status = state.user ? await pushStatus() : null;
+  els.pushSettings.replaceChildren(...pushCard(status, false));
+  const showBanner = Boolean(state.user) && !bannerDismissed() && (status === 'off' || status === 'ios-install');
+  els.pushBanner.replaceChildren(...(showBanner ? pushCard(status, true) : []));
+  els.pushBanner.hidden = !showBanner;
+}
+
+// ─── In-app notifications (the bell) ─────────────────────────────────────
+
+function setUnread(count) {
+  state.unread = count;
+  els.bellCount.textContent = count > 9 ? '9+' : String(count);
+  els.bellCount.hidden = count === 0;
+  els.bell.setAttribute('aria-label', count ? `Notifications, ${count} unread` : 'Notifications');
+}
+
+async function refreshUnread() {
+  if (!state.user) return setUnread(0);
+  const { count } = await sb.from('notifications').select('id', { count: 'exact', head: true }).is('read_at', null);
+  setUnread(count ?? 0);
+}
+
+async function openInbox() {
+  els.inboxList.replaceChildren(h('p', { class: 'status' }, 'Loading…'));
+  renderPushUi();
+  els.inbox.showModal();
+  await loadInbox();
+  markAllRead();
+}
+
+async function loadInbox() {
+  const { data, error } = await sb.from('notifications').select(NOTIFICATION_FIELDS)
+    .order('created_at', { ascending: false }).limit(50);
+  if (error) {
+    console.error(error);
+    els.inboxList.replaceChildren(h('p', { class: 'status' }, "Couldn't load notifications."));
+    return;
+  }
+  if (!data.length) {
+    els.inboxList.replaceChildren(h('p', { class: 'status' }, 'Nothing yet. New meetup invites will show up here.'));
+    return;
+  }
+  els.inboxList.replaceChildren(...data.map(renderNotification));
+}
+
+function renderNotification(n) {
+  const meetup = n.post?.meetup_start ? formatMeetup(new Date(n.post.meetup_start), n.post.meetup_minutes) : null;
+  return h('button', {
+    type: 'button',
+    class: `inbox-item${n.read_at ? '' : ' unread'}`,
+    onclick: () => openPostById(n.post_id),
+  },
+    avatar(n.actor),
+    h('div', {},
+      h('p', { class: 'inbox-text' }, h('strong', {}, n.actor?.display_name || 'Someone'), ' invited you to a meetup'),
+      h('div', { class: 'inbox-meta' }, [meetup, timeAgo(n.created_at)].filter(Boolean).join(' · ')),
+    ),
+  );
+}
+
+async function markAllRead() {
+  if (!state.unread) return;
+  setUnread(0);
+  await sb.from('notifications').update({ read_at: new Date().toISOString() }).is('read_at', null);
+}
+
+function subscribeNotifications() {
+  if (state.notificationsChannel) {
+    sb.removeChannel(state.notificationsChannel);
+    state.notificationsChannel = null;
+  }
+  if (!state.user) return;
+  state.notificationsChannel = sb.channel(`notifications:${state.user.id}`)
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${state.user.id}` }, () => {
+      setUnread(state.unread + 1);
+      if (els.inbox.open) loadInbox().then(markAllRead);
+    })
+    .subscribe();
+}
+
+// Opens a post's thread (with its Coming / Not buttons), even if it isn't loaded in the feed.
+async function openPostById(id) {
+  if (!id) return;
+  if (!state.posts.has(id)) {
+    const { data } = await sb.from('posts').select(POST_FIELDS).eq('id', id).maybeSingle();
+    if (!data) return toast('That post was deleted.');
+    state.posts.set(id, data);
+    await loadMyLikes([id]);
+  }
+  if (els.inbox.open) els.inbox.close();
+  openThread(id);
+}
+
+// Links like …/wc-caller/#post-42 (used by notifications) open that post.
+function openFromHash() {
+  const match = location.hash.match(/^#post-(\d+)$/);
+  if (!match) return;
+  history.replaceState(null, '', location.pathname + location.search);
+  openPostById(Number(match[1]));
+}
+
 // ─── Accounts ────────────────────────────────────────────────────────────
 
 function signIn() {
@@ -640,6 +879,12 @@ function signIn() {
 }
 
 async function signOut() {
+  // Stop this device's notifications so the next person to sign in here doesn't get them.
+  const subscription = await currentSubscription().catch(() => null);
+  if (subscription) {
+    await sb.from('push_subscriptions').delete().eq('endpoint', subscription.endpoint);
+    await subscription.unsubscribe();
+  }
   await sb.auth.signOut();
 }
 
@@ -672,6 +917,11 @@ async function onUserChanged(user) {
   }
   renderAccount();
   els.fab.hidden = !user;
+  els.bell.hidden = !user;
+  refreshUnread();
+  subscribeNotifications();
+  syncPushSubscription();
+  renderPushUi();
   for (const id of state.posts.keys()) updateCard(id);
   if (state.threadPostId) {
     renderThreadFoot();
@@ -731,10 +981,34 @@ document.querySelectorAll('[data-close]').forEach((btn) => btn.addEventListener(
 document.addEventListener('click', () => document.querySelectorAll('.menu').forEach((m) => { m.hidden = true; }));
 
 els.thread.addEventListener('click', (e) => { if (e.target === els.thread) els.thread.close(); });
+els.inbox.addEventListener('click', (e) => { if (e.target === els.inbox) els.inbox.close(); });
 els.thread.addEventListener('close', () => { state.threadPostId = null; state.threadComments = []; });
 els.fab.addEventListener('click', openComposer);
+els.bell.addEventListener('click', openInbox);
 els.newPosts.addEventListener('click', reloadFeed);
 $('brand').addEventListener('click', reloadFeed);
+
+// Keep full-screen sheets within the area above the on-screen keyboard.
+function fitSheetsToViewport() {
+  const vv = window.visualViewport;
+  document.documentElement.style.setProperty('--vv-height', `${vv.height}px`);
+  document.documentElement.style.setProperty('--vv-top', `${vv.offsetTop}px`);
+}
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', fitSheetsToViewport);
+  window.visualViewport.addEventListener('scroll', fitSheetsToViewport);
+  fitSheetsToViewport();
+}
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(console.error);
+  // A notification was tapped while the app was already open.
+  navigator.serviceWorker.addEventListener('message', (event) => {
+    if (event.data?.type === 'open-url') location.hash = new URL(event.data.url).hash;
+  });
+}
+window.addEventListener('hashchange', openFromHash);
+openFromHash();
 
 setInterval(() => {
   document.querySelectorAll('time.post-time').forEach((t) => { t.textContent = timeAgo(t.getAttribute('datetime')); });

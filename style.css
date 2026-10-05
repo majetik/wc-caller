@@ -96,7 +96,26 @@ a { color: var(--accent); }
   letter-spacing: -0.02em;
 }
 
+.top-actions { display: flex; align-items: center; gap: 6px; }
+
 .account { position: relative; }
+
+.bell { position: relative; color: var(--text); }
+.bell-count {
+  position: absolute;
+  top: 3px;
+  right: 2px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--like);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
 
 .avatar-btn {
   border: 0;
@@ -354,11 +373,16 @@ video.post-media { object-fit: contain; background: #000; }
 
 /* ─── Sheets (composer, thread) ───────────────────────────── */
 
+/* --vv-height / --vv-top track the part of the screen not covered by the
+   on-screen keyboard (set from app.js), so the toolbar stays visible above it. */
 dialog.sheet {
+  position: fixed;
+  top: var(--vv-top, 0px);
+  bottom: auto;
   width: 100%;
   max-width: 100%;
-  height: 100dvh;
-  max-height: 100dvh;
+  height: var(--vv-height, 100dvh);
+  max-height: var(--vv-height, 100dvh);
   margin: 0;
   padding: 0;
   border: 0;
@@ -369,6 +393,7 @@ dialog.sheet::backdrop { background: rgb(0 0 0 / 0.5); }
 
 @media (min-width: 640px) {
   dialog.sheet {
+    top: 0;
     max-width: 600px;
     height: auto;
     max-height: 85dvh;
@@ -514,6 +539,44 @@ dialog.sheet::backdrop { background: rgb(0 0 0 / 0.5); }
   font-size: 16px;
 }
 .comment-form .primary-btn { min-height: 42px; }
+
+/* ─── Notifications ───────────────────────────────────────── */
+
+.push-banner {
+  margin: 12px 16px 4px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg));
+}
+.push-banner p, .push-settings p { margin: 0 0 10px; }
+.push-banner .banner-title, .push-settings .banner-title { font-weight: 700; margin-bottom: 4px; }
+.push-banner ol, .push-settings ol { margin: 0 0 10px; padding-left: 20px; }
+.push-banner li, .push-settings li { margin: 4px 0; }
+.banner-actions { display: flex; align-items: center; gap: 12px; }
+.banner-actions .text-btn { color: var(--muted); font-size: 15px; }
+
+.push-settings {
+  padding: 14px 16px;
+  border-bottom: 6px solid var(--surface);
+}
+.push-settings .muted { color: var(--muted); font-size: 14px; }
+
+.inbox-item {
+  display: grid;
+  grid-template-columns: 40px 1fr;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 16px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: none;
+  text-align: left;
+}
+.inbox-item.unread { background: color-mix(in srgb, var(--accent) 7%, var(--bg)); }
+.inbox-item .avatar { width: 40px; height: 40px; }
+.inbox-text { margin: 0; }
+.inbox-meta { color: var(--muted); font-size: 14px; margin-top: 2px; }
 
 /* ─── Toast ───────────────────────────────────────────────── */
 
