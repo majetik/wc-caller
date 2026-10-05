@@ -5,19 +5,23 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <title>WC Caller</title>
   <meta name="description" content="A simple feed for posts, photos, videos and meetups.">
-  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#0b0e11" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#15112b">
+  <meta name="color-scheme" content="dark">
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="WC Caller">
-  <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="apple-touch-icon" href="apple-touch-icon.png">
-  <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="style.css?v=2">
-  <script type="module" src="app.js?v=2"></script>
+  <link rel="icon" href="icon.svg?v=3" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png?v=3">
+  <link rel="manifest" href="manifest.webmanifest?v=3">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap">
+  <link rel="stylesheet" href="style.css?v=3">
+  <script type="module" src="app.js?v=3"></script>
 </head>
 <body>
   <header class="topbar">
-    <button id="brand" class="brand" type="button" aria-label="WC Caller, refresh feed">WC Caller</button>
+    <button id="brand" class="brand" type="button" aria-label="WC Caller, refresh feed"><span class="brand-dot" aria-hidden="true"></span>WC Caller</button>
     <div class="top-actions">
       <button id="bell" class="icon-btn bell" type="button" aria-label="Notifications" data-icon="bell" hidden>
         <span id="bell-count" class="bell-count" hidden></span>

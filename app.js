@@ -1,6 +1,6 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 // Bump ?v= here and in index.html on each release so browsers don't mix cached old files with new ones.
-import { SUPABASE_URL, SUPABASE_KEY, VAPID_PUBLIC_KEY } from './config.js?v=2';
+import { SUPABASE_URL, SUPABASE_KEY, VAPID_PUBLIC_KEY } from './config.js?v=3';
 
 const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
 
@@ -12,7 +12,7 @@ const APP_URL = location.origin + location.pathname;
 const POST_FIELDS = `id, body, media_path, media_type, meetup_start, meetup_minutes, created_at, author_id,
   author:profiles!posts_author_id_fkey(display_name, avatar_url),
   likes(count), comments(count),
-  rsvps(user_id, status, profile:profiles(display_name))`;
+  rsvps(user_id, status, profile:profiles(display_name, avatar_url))`;
 const COMMENT_FIELDS = 'id, post_id, body, created_at, author_id, author:profiles!comments_author_id_fkey(display_name, avatar_url)';
 const NOTIFICATION_FIELDS = `id, kind, created_at, read_at, post_id,
   actor:profiles!notifications_actor_id_fkey(display_name, avatar_url),
@@ -133,13 +133,26 @@ function linkify(text) {
   return frag;
 }
 
-function avatar(profile) {
-  if (profile?.avatar_url) {
-    return h('img', { class: 'avatar', src: profile.avatar_url, alt: '', referrerpolicy: 'no-referrer', loading: 'lazy' });
-  }
-  const initial = (profile?.display_name || '?').trim().charAt(0).toUpperCase();
-  return h('span', { class: 'avatar avatar-fallback', 'aria-hidden': 'true' }, initial);
+// People without a profile photo get a stable accent colour based on their name.
+const AVATAR_COLORS = ['#ff4fa3', '#c8ff3e', '#7fd8ff', '#ffb547', '#b18cff'];
+
+function colorFor(seed) {
+  let hash = 0;
+  for (const ch of seed) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  return AVATAR_COLORS[hash % AVATAR_COLORS.length];
 }
+
+function avatar(profile, extraClass = '') {
+  const className = `avatar${extraClass ? ` ${extraClass}` : ''}`;
+  if (profile?.avatar_url) {
+    return h('img', { class: className, src: profile.avatar_url, alt: '', referrerpolicy: 'no-referrer', loading: 'lazy' });
+  }
+  const name = (profile?.display_name || '?').trim();
+  return h('span', { class: `${className} avatar-fallback`, style: `background:${colorFor(name)}`, 'aria-hidden': 'true' },
+    name.charAt(0).toUpperCase());
+}
+
+const firstName = (profile) => (profile?.display_name || 'Member').trim().split(/\s+/)[0];
 
 let toastTimer;
 function toast(message) {
@@ -174,35 +187,57 @@ function renderPost(post) {
   const commentCount = post.comments?.[0]?.count ?? 0;
   const liked = state.myLikes.has(post.id);
   const mine = state.user?.id === post.author_id;
+  const isMeetup = Boolean(post.meetup_start);
+  // Upcoming meetups get the glowing card so plans stand out in the feed.
+  const upcoming = isMeetup && meetupEnd(post) > new Date();
 
-  return h('article', { class: 'post', 'data-id': post.id },
-    avatar(post.author),
-    h('div', { class: 'post-main' },
-      h('div', { class: 'post-head' },
-        h('span', { class: 'post-author' }, post.author?.display_name || 'Member'),
+  return h('article', { class: `post card${upcoming ? ' hot' : ''}`, 'data-id': post.id },
+    h('div', { class: 'post-head' },
+      avatar(post.author),
+      h('div', { class: 'post-who' },
+        h('div', { class: 'post-author' }, post.author?.display_name || 'Member'),
         h('time', { class: 'post-time', datetime: post.created_at, title: new Date(post.created_at).toLocaleString() }, timeAgo(post.created_at)),
-        mine && h('button', { type: 'button', class: 'icon-btn small post-delete', 'aria-label': 'Delete post', onclick: () => deletePost(post.id) }, icon('trash')),
       ),
-      post.body && h('p', { class: 'post-body' }, linkify(post.body)),
-      post.media_path && renderMedia(post),
-      post.meetup_start && renderMeetup(post),
-      h('div', { class: 'post-actions' },
-        h('button', {
-          type: 'button',
-          class: `action like${liked ? ' active' : ''}`,
-          'aria-pressed': String(liked),
-          'aria-label': `Like, ${likeCount}`,
-          onclick: () => toggleLike(post.id),
-        }, icon('heart'), h('span', {}, likeCount ? String(likeCount) : '')),
-        h('button', {
-          type: 'button',
-          class: 'action',
-          'aria-label': `Comments, ${commentCount}`,
-          onclick: () => openThread(post.id),
-        }, icon('comment'), h('span', {}, commentCount ? String(commentCount) : '')),
-      ),
+      mine && h('button', { type: 'button', class: 'icon-btn small post-delete', 'aria-label': 'Delete post', onclick: () => deletePost(post.id) }, icon('trash')),
+    ),
+    !isMeetup && post.body && h('p', { class: 'post-body' }, linkify(post.body)),
+    isMeetup && renderMeetup(post),
+    post.media_path && renderMedia(post),
+    h('div', { class: 'post-actions' },
+      h('button', {
+        type: 'button',
+        class: `action like${liked ? ' active' : ''}`,
+        'aria-pressed': String(liked),
+        'aria-label': `Like, ${likeCount}`,
+        onclick: () => toggleLike(post.id),
+      }, icon('heart'), h('span', {}, likeCount ? String(likeCount) : '')),
+      h('button', {
+        type: 'button',
+        class: 'action',
+        'aria-label': `Comments, ${commentCount}`,
+        onclick: () => openThread(post.id),
+      }, icon('comment'), h('span', {}, commentCount ? String(commentCount) : '')),
     ),
   );
+}
+
+function meetupEnd(post) {
+  return new Date(new Date(post.meetup_start).getTime() + post.meetup_minutes * 60000);
+}
+
+function formatTimeRange(start, minutes) {
+  const end = new Date(start.getTime() + minutes * 60000);
+  const time = (d) => d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  return `${time(start)} – ${time(end)}`;
+}
+
+// "You, Maya, Priya + 2"
+function comingSummary(coming) {
+  const names = coming
+    .map((r) => (r.user_id === state.user?.id ? 'You' : firstName(r.profile)))
+    .sort((a, b) => (a === 'You' ? -1 : b === 'You' ? 1 : 0));
+  const shown = names.slice(0, 3).join(', ');
+  return names.length > 3 ? `${shown} + ${names.length - 3}` : shown;
 }
 
 function renderMedia(post) {
@@ -216,8 +251,8 @@ function renderMedia(post) {
 
 function renderMeetup(post) {
   const start = new Date(post.meetup_start);
-  const end = new Date(start.getTime() + post.meetup_minutes * 60000);
-  const over = end < new Date();
+  const over = meetupEnd(post) < new Date();
+  const title = post.body.trim();
   const rsvps = post.rsvps || [];
   const coming = rsvps.filter((r) => r.status === 'coming');
   const notCount = rsvps.length - coming.length;
@@ -232,20 +267,26 @@ function renderMeetup(post) {
   }, label, count ? h('span', { class: 'rsvp-count' }, String(count)) : null);
 
   return h('div', { class: `meetup${over ? ' over' : ''}` },
-    h('div', { class: 'meetup-head' },
-      icon('calendar'),
-      h('div', {},
-        h('div', { class: 'meetup-label' }, over ? 'Meetup · ended' : 'Meetup invite'),
-        h('div', { class: 'meetup-when' }, formatMeetup(start, post.meetup_minutes)),
-        h('div', { class: 'meetup-duration' }, formatDuration(post.meetup_minutes)),
+    h('span', { class: 'tag' }, icon('calendar'), over ? 'Meetup · ended' : 'Meetup'),
+    h('div', { class: 'mt' },
+      h('div', { class: 'date-tile', role: 'img', 'aria-label': formatMeetup(start, post.meetup_minutes) },
+        h('small', {}, start.toLocaleDateString(undefined, { weekday: 'short' })),
+        h('b', {}, String(start.getDate())),
+        h('small', {}, start.toLocaleDateString(undefined, { month: 'short' })),
+      ),
+      h('div', { class: 'mt-info' },
+        h('div', { class: 'mt-title' }, title ? linkify(title) : `Meetup with ${firstName(post.author)}`),
+        h('div', { class: 'mt-time' }, `${formatTimeRange(start, post.meetup_minutes)} · ${formatDuration(post.meetup_minutes)}`),
       ),
     ),
     h('div', { class: 'rsvp-row' },
       rsvpButton('coming', 'Coming', coming.length),
       rsvpButton('not', 'Not', notCount),
     ),
-    coming.length > 0 && h('p', { class: 'meetup-who' },
-      h('strong', {}, 'Coming: '), coming.map((r) => r.profile?.display_name || 'Member').join(', ')),
+    coming.length > 0 && h('div', { class: 'going' },
+      h('span', { class: 'stack' }, coming.slice(0, 4).map((r) => avatar(r.profile, 'mini'))),
+      h('span', {}, comingSummary(coming)),
+    ),
     myStatus === 'coming' && !over && h('a', { class: 'meetup-cal', href: calendarUrl(post), target: '_blank', rel: 'noopener' }, 'Add to Google Calendar'),
   );
 }
@@ -363,7 +404,7 @@ async function setRsvp(id, status) {
   state.pending.add(key);
   const previous = post.rsvps;
   post.rsvps = (post.rsvps || []).filter((r) => r.user_id !== state.user.id);
-  if (next) post.rsvps.push({ user_id: state.user.id, status: next, profile: { display_name: state.profile?.display_name } });
+  if (next) post.rsvps.push({ user_id: state.user.id, status: next, profile: state.profile });
   updateCard(id);
 
   const { error } = next
